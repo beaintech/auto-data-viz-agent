@@ -3,15 +3,33 @@ import io
 from typing import List, Optional
 
 import pandas as pd
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
-from PIL import Image
 import plotly.io as pio
 
 from .chart_suggester import ChartSpec
 from .viz import render_chart
+
+
+def _require_reportlab():
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import cm
+        from reportlab.lib.utils import ImageReader
+        return A4, canvas, cm, ImageReader
+    except ModuleNotFoundError as e:
+        raise RuntimeError(
+            "PDF export requires `reportlab`. Install dependencies with `pip install -r requirements.txt`."
+        ) from e
+
+
+def _require_pillow():
+    try:
+        from PIL import Image
+        return Image
+    except ModuleNotFoundError as e:
+        raise RuntimeError(
+            "PDF export requires `Pillow`. Install dependencies with `pip install -r requirements.txt`."
+        ) from e
 
 
 def kaleido_available() -> bool:
@@ -58,6 +76,9 @@ def build_pdf_report(
       - One page per chart in `specs`
     Returns PDF bytes.
     """
+    A4, canvas, cm, ImageReader = _require_reportlab()
+    Image = _require_pillow()
+
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
     W, H = A4
