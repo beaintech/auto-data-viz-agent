@@ -54,12 +54,17 @@ def _fig_to_png_bytes(fig) -> bytes:
             "Install with `pip install -r requirements.txt` in the same environment and restart the app."
         )
     try:
-        return fig.to_image(format="png", scale=2, engine="kaleido")
-    except Exception as e:
-        raise RuntimeError(
-            "Plotly static export failed even though `kaleido` is present. "
-            "Try reinstalling with `pip install -U kaleido` and restart."
-        ) from e
+        return pio.to_image(fig, format="png", engine="kaleido", scale=2, validate=False)
+    except Exception as e_high_res:
+        # Retry with a smaller export to avoid memory/driver issues on some hosts (e.g., Streamlit Cloud)
+        try:
+            return pio.to_image(fig, format="png", engine="kaleido", scale=1, validate=False)
+        except Exception as e:
+            raise RuntimeError(
+                "Plotly static export failed even though `kaleido` is installed. "
+                f"Underlying error: {e}. On hosted environments, ensure system libs for headless Chrome are present "
+                "(libnss3, libatk, libgtk3, libasound2) and that `kaleido` is up to date (`pip install -U kaleido`)."
+            ) from e
 
 
 def build_pdf_report(
