@@ -79,7 +79,10 @@ if df is not None:
     from src.report import kaleido_available
     kaleido_ok = kaleido_available()
     if not kaleido_ok:
-        st.warning("`kaleido` not detected — install via `pip install -r requirements.txt` to enable PDF export.")
+        st.warning(
+            "`kaleido`/Chrome not detected — install deps via `pip install -r requirements.txt` "
+            "and ensure Google Chrome/Chromium is installed (or run `plotly_get_chrome`) to enable PDF export."
+        )
 
     if st.button("Download PDF", disabled=not kaleido_ok):
         with st.spinner("Building PDF..."):
