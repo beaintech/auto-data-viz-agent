@@ -76,10 +76,20 @@ if df is not None:
     st.subheader("Export")
     report_title = st.text_input("Report Title", value=f"Auto Data Visualization Agent — {datetime.now().strftime('%Y-%m-%d')}")
     brand = st.text_input("Brand/Author", value="Auto Data Visualization Agent")
-    if st.button("Download PDF"):
+    from src.report import kaleido_available
+    kaleido_ok = kaleido_available()
+    if not kaleido_ok:
+        st.warning("`kaleido` not detected — install via `pip install -r requirements.txt` to enable PDF export.")
+
+    if st.button("Download PDF", disabled=not kaleido_ok):
         with st.spinner("Building PDF..."):
-            pdf_bytes = build_pdf_report(df, chosen, report_title, brand, theme=theme, insights=insights_text)
-        st.download_button("Download PDF", data=pdf_bytes, file_name="auto_viz_report.pdf", mime="application/pdf")
+            try:
+                pdf_bytes = build_pdf_report(df, chosen, report_title, brand, theme=theme, insights=insights_text)
+            except Exception as e:
+                st.error(f"Failed to build PDF: {e}")
+                pdf_bytes = None
+        if pdf_bytes:
+            st.download_button("Download PDF", data=pdf_bytes, file_name="auto_viz_report.pdf", mime="application/pdf")
 
 else:
     st.info("Upload a file or paste a Google Sheets CSV URL in the sidebar to begin.")

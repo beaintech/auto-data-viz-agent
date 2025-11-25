@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 from src.chart_suggester import suggest_charts
 from src.report import build_pdf_report
 from src.viz import render_chart
@@ -16,6 +17,7 @@ def test_suggest_and_render():
     assert fig is not None
 
 def test_pdf_report():
+    pytest.importorskip("kaleido")
     import pandas as pd
     df = pd.DataFrame({
         "date": pd.date_range("2024-01-01", periods=3, freq="D"),

@@ -14,18 +14,33 @@ from .chart_suggester import ChartSpec
 from .viz import render_chart
 
 
+def kaleido_available() -> bool:
+    """
+    Returns True if kaleido is importable and Plotly can see its scope.
+    """
+    try:
+        import kaleido  # noqa: F401
+    except Exception:
+        return False
+    return getattr(pio, "kaleido", None) is not None and getattr(pio.kaleido, "scope", None) is not None
+
+
 def _fig_to_png_bytes(fig) -> bytes:
     """
     Convert a Plotly figure to PNG bytes using kaleido backend.
     Requires `kaleido` (listed in requirements.txt).
     """
-    try:
-        return fig.to_image(format="png", scale=2)
-    except Exception as e:
-        # Helpful error if kaleido is missing
+    if not kaleido_available():
         raise RuntimeError(
-            "Plotly static export failed. Ensure `kaleido` is installed "
-            "(pip install kaleido) and restart."
+            "Plotly static export failed because `kaleido` is missing or not detected. "
+            "Install with `pip install -r requirements.txt` in the same environment and restart the app."
+        )
+    try:
+        return fig.to_image(format="png", scale=2, engine="kaleido")
+    except Exception as e:
+        raise RuntimeError(
+            "Plotly static export failed even though `kaleido` is present. "
+            "Try reinstalling with `pip install -U kaleido` and restart."
         ) from e
 
 

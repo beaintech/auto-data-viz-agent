@@ -1,3 +1,4 @@
+import warnings
 import pandas as pd
 
 def detect_time_column(df: pd.DataFrame):
@@ -13,7 +14,15 @@ def detect_time_column(df: pd.DataFrame):
 
         # Try parsing only object/string columns
         try:
-            parsed = pd.to_datetime(s, errors='coerce', infer_datetime_format=True)
+            series = (
+                s.astype(str)
+                .str.replace("\u00A0", " ", regex=False)
+                .str.replace("/", "-", regex=False)
+                .str.strip()
+            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Could not infer format.*")
+                parsed = pd.to_datetime(series, errors="coerce")
             ok_ratio = parsed.notna().mean()
             # require enough valid dates and sensible years
             if ok_ratio > 0.8:

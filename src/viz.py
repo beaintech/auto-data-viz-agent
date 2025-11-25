@@ -26,5 +26,6 @@ def render_chart(df: pd.DataFrame, spec: ChartSpec, theme: str = "Default"):
 
     if spec.title:
         fig.update_layout(title=spec.title)
-    fig.update_layout(height=420, margin=dict(l=20, r=20, t=50, b=20))
+    # Fix height and disable autosize to avoid repeated auto-margin redraw warnings in Streamlit
+    fig.update_layout(height=420, margin=dict(l=20, r=20, t=50, b=20), autosize=False)
     return fig

@@ -8,6 +8,7 @@ Includes optional AI-generated insights (OpenAI) and GitHub CI.
 - Auto schema inference + quick summary
 - Suggested charts: line, bar, pie; switchable
 - Theme selection (light/dark/brand color)
+- Built-in cleaner: trims headers/cells, coerces price/amount fields, parses numeric + datetime-ish columns
 - One-click PDF report export (charts + insights)
 - Optional AI insights via `OPENAI_API_KEY`
 - Ready-to-deploy on Render / Hugging Face Spaces / Streamlit Community
@@ -86,3 +87,14 @@ git push -u origin main
 # streamlit run app.py
 
 https://auto-data-viz-agent-euthwbdgvjnaaalqbhmv92.streamlit.app/
+
+https://beaintech-claude-data-viz-app-ojcplh.streamlit.app/
+
+## Data cleaning model (Excel/CSV)
+- The loader routes uploads through `src/data_cleaner.py`'s `cleaner.clean(df)` pipeline.
+- It strips whitespace, converts empty strings to `NaN`, coerces price/amount columns (€, comma decimals), tries numeric/date conversion, and drops empty rows/columns + duplicates.
+- Reuse it directly in your own code:
+```python
+from src.data_cleaner import cleaner
+clean_df = cleaner.clean(df_from_excel_or_csv)
+```
