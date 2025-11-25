@@ -25,5 +25,10 @@ def test_pdf_report():
         "cat": ["x","y","x"]
     })
     spec = ChartSpec(kind="line", x="date", y="value", title="Value over time")
-    pdf = build_pdf_report(df, [spec], "Test Report", "Auto Viz Agent", theme="Default", insights="Test")
+    try:
+        pdf = build_pdf_report(df, [spec], "Test Report", "Auto Viz Agent", theme="Default", insights="Test")
+    except RuntimeError as e:
+        if "kaleido" in str(e).lower():
+            pytest.skip(f"Kaleido export unavailable in test environment: {e}")
+        raise
     assert isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000

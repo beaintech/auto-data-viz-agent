@@ -13,7 +13,7 @@ Includes optional AI-generated insights (OpenAI) and GitHub CI.
 - Optional AI insights via `OPENAI_API_KEY`
 - Ready-to-deploy on Render / Hugging Face Spaces / Streamlit Community
 - GitHub Actions CI (lint + basic tests)
-- PDF export uses Plotly + Kaleido (needs Chrome/Chromium)
+- PDF export uses Plotly + Kaleido (no external Chrome required)
 
 ## Quickstart
 
@@ -30,9 +30,9 @@ export OPENAI_API_KEY=sk-...   # Windows PowerShell: $env:OPENAI_API_KEY="sk-...
 ```
 
 ### PDF export (Kaleido)
-- Install Google Chrome or Chromium on the host (or run `plotly_get_chrome` to download a headless build).
-- If running on Linux, ensure Chrome deps exist: `libnss3`, `libatk`, `libgtk3`, `libasound2`.
-- Keep `kaleido` up to date: `pip install -U kaleido`.
+- Kaleido ships a headless Chromium binary; just install Python deps via `pip install -r requirements.txt`.
+- If export fails, try upgrading Kaleido: `pip install -U kaleido`.
+- On minimal Linux images you may still need basic GTK/NSS libs (`libnss3`, `libatk`, `libgtk3`, `libasound2`).
 
 ### Google Sheets
 Paste a viewable CSV export link like:

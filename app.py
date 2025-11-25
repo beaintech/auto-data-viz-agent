@@ -80,8 +80,8 @@ if df is not None:
     kaleido_ok = kaleido_available()
     if not kaleido_ok:
         st.warning(
-            "`kaleido`/Chrome not detected — install deps via `pip install -r requirements.txt` "
-            "and ensure Google Chrome/Chromium is installed (or run `plotly_get_chrome`) to enable PDF export."
+            "`kaleido` is not available. Install dependencies via `pip install -r requirements.txt` "
+            "in the same environment to enable PDF export."
         )
 
     if st.button("Download PDF", disabled=not kaleido_ok):
