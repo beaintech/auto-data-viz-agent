@@ -4,12 +4,23 @@ from pydantic import BaseModel
 from .utils import detect_time_column
 
 class ChartSpec(BaseModel):
-    kind: str                 # line | bar | pie
+    kind: str                 # line | bar | pie | waterfall
     x: Optional[str] = None
     y: Optional[str] = None
     category: Optional[str] = None
     agg: str = "sum"
     title: Optional[str] = None
+
+def _pie_safe(df: pd.DataFrame, category: str, value_col: str) -> bool:
+    """Return True if summed values per category are all positive (pie-friendly)."""
+    if category not in df.columns or value_col not in df.columns:
+        return False
+    if not pd.api.types.is_numeric_dtype(df[value_col]):
+        return False
+    grouped = df.groupby(category)[value_col].sum(min_count=1)
+    if grouped.empty:
+        return False
+    return (grouped > 0).all()
 
 def suggest_charts(df: pd.DataFrame) -> List[ChartSpec]:
     specs: List[ChartSpec] = []
@@ -28,7 +39,10 @@ def suggest_charts(df: pd.DataFrame) -> List[ChartSpec]:
 
     # pie for category share
     if cat_cols and numeric_cols:
-        specs.append(ChartSpec(kind="pie", category=cat_cols[0], y=numeric_cols[0], title=f"Share of {numeric_cols[0]} by {cat_cols[0]}"))
+        if _pie_safe(df, cat_cols[0], numeric_cols[0]):
+            specs.append(ChartSpec(kind="pie", category=cat_cols[0], y=numeric_cols[0], title=f"Share of {numeric_cols[0]} by {cat_cols[0]}"))
+        else:
+            specs.append(ChartSpec(kind="waterfall", category=cat_cols[0], y=numeric_cols[0], title=f"Contribution of {numeric_cols[0]} by {cat_cols[0]}"))
 
     # fallback: bar of first two numeric columns
     if not specs and len(numeric_cols) >= 2:

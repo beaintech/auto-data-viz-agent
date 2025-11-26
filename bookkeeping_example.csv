@@ -1,0 +1,6 @@
+Date,Description,Amount,Currency,IBAN
+2024-01-01,Stripe payout,1200.5,EUR,DE123
+2024-01-03,Rewe purchase,-45.9,EUR,DE456
+2024-01-05,Amazon order,-89.99,EUR,DE789
+2024-01-08,Payroll salary,-2500.0,EUR,DE111
+2024-01-10,PayPal payout,980.0,EUR,DE222

@@ -11,11 +11,38 @@ from src.chart_suggester import suggest_charts, ChartSpec
 from src.viz import render_chart, THEMES
 from src.insights import generate_insights
 from src.report import build_pdf_report
+from src.bookkeeping import process_tabular
+
+
+def format_eur(value: float) -> str:
+    return f"€{value:,.2f}"
+
+
+def render_kpi_cards(cards: dict):
+    """
+    Render bookkeeping KPIs as small metric cards.
+    """
+    labels = [
+        ("Revenue", "revenue"),
+        ("Cost", "cost"),
+        ("Payroll", "payroll"),
+        ("Profit", "profit"),
+        ("VAT base", "vat_base"),
+        ("VAT amount", "vat_amount"),
+    ]
+
+    # Keep two rows of three cards for compact layout
+    for chunk_start in range(0, len(labels), 3):
+        chunk = labels[chunk_start : chunk_start + 3]
+        cols = st.columns(len(chunk))
+        for col, (label, key) in zip(cols, chunk):
+            with col:
+                st.metric(label=label, value=format_eur(cards.get(key, 0.0)))
 
 st.set_page_config(page_title="Auto Data Visualization Agent", layout="wide")
 
-st.title("🤖 AI Auto Data Visualization Agent — Excel → Charts → PDF")
-st.caption("Upload a CSV/Excel or paste a Google Sheets CSV URL. Auto charts + optional AI insights + PDF export.")
+st.title("Bookkeeping Automation — Upload → Clean → KPIs")
+st.caption("Upload a CSV/Excel or Google Sheets CSV URL. We clean transactions, auto-categorize, compute P&L KPIs, and can still export charts/PDF.")
 
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -44,6 +71,27 @@ if df is not None:
         st.dataframe(df.head(50), use_container_width=True)
     with st.expander("ℹ️ Summary", expanded=False):
         st.write(brief_summary(df))
+
+    # Bookkeeping KPI cards
+    with st.expander("💼 Bookkeeping KPIs", expanded=True):
+        try:
+            summaries = process_tabular(df)
+            cards = summaries.get("cards", {}) or {}
+            # ensure bookkeeping staples always present
+            defaults = {
+                "revenue": 0.0,
+                "cost": 0.0,
+                "payroll": 0.0,
+                "profit": cards.get("revenue", 0.0) + cards.get("cost", 0.0),
+                "vat_base": 0.0,
+                "vat_amount": 0.0,
+            }
+            for k, v in defaults.items():
+                cards.setdefault(k, v)
+
+            render_kpi_cards(cards)
+        except Exception as e:
+            st.info(f"Bookkeeping KPIs unavailable: {e}")
 
     # Chart suggestions
     specs = suggest_charts(df)

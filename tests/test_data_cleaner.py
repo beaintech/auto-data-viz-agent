@@ -28,5 +28,5 @@ def test_data_cleaner_normalizes_and_coerces_types():
     assert cleaned["date"].iloc[0].year == 2024
 
     # trimmed text and duplicate rows removed
-    assert cleaned["City"].iloc[0] == "Berlin"
+    assert cleaned["city"].iloc[0] == "Berlin"
     assert len(cleaned) == 2
