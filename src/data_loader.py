@@ -15,10 +15,9 @@ def _detect_delimiter(raw: bytes) -> str:
             return dialect.delimiter
     except Exception:
         pass
-    # 回退：谁更多用谁
     return ";" if head.count(";") > head.count(",") else ","
 
-def load_from_upload(uploaded) -> Tuple[pd.DataFrame, str]:
+def load_from_upload(uploaded, clean: bool = True) -> Tuple[pd.DataFrame, str]:
     name = uploaded.name
     if not name.lower().endswith((".csv", ".xlsx")):
         raise ValueError("Unsupported file type. Use .csv or .xlsx")
@@ -26,7 +25,8 @@ def load_from_upload(uploaded) -> Tuple[pd.DataFrame, str]:
     # Excel 直接读
     if name.lower().endswith(".xlsx"):
         df = pd.read_excel(uploaded)
-        df = cleaner.clean(df)
+        if clean:
+            df = cleaner.clean(df)
         return df, name
 
     # CSV：先读原始字节，再判定分隔符
@@ -36,7 +36,8 @@ def load_from_upload(uploaded) -> Tuple[pd.DataFrame, str]:
     if sep == ",":
         # 逗号 CSV：直接按逗号读（不做任何清洗）
         df = pd.read_csv(io.BytesIO(raw), sep=",", engine="python")
-        df = cleaner.clean(df)
+        if clean:
+            df = cleaner.clean(df)
 
         # —— 可选：若你“必须统一转成分号”，取消下面三行的注释即可 —— 
         # buf = io.StringIO()
@@ -48,16 +49,18 @@ def load_from_upload(uploaded) -> Tuple[pd.DataFrame, str]:
     else:
         # 分号 CSV：按分号读
         df = pd.read_csv(io.BytesIO(raw), sep=";", engine="python")
-    df = cleaner.clean(df)
+    if clean:
+        df = cleaner.clean(df)
     return df, name
 
-def load_from_gsheet_url(url: str) -> Tuple[pd.DataFrame, str]:
+def load_from_gsheet_url(url: str, clean: bool = True) -> Tuple[pd.DataFrame, str]:
     # Expecting a CSV export URL
     r = requests.get(url, timeout=20)
     r.raise_for_status()
     content = r.content
     df = pd.read_csv(io.BytesIO(content))
-    df = cleaner.clean(df)
+    if clean:
+        df = cleaner.clean(df)
     return df, "GoogleSheets.csv"
 
 def brief_summary(df: pd.DataFrame) -> str:

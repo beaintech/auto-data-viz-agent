@@ -11,7 +11,7 @@ from src.chart_suggester import suggest_charts, ChartSpec
 from src.viz import render_chart, THEMES
 from src.insights import generate_insights
 from src.report import build_pdf_report
-from src.bookkeeping import process_tabular
+from src.pipeline import process_uploaded_file
 
 
 def format_eur(value: float) -> str:
@@ -49,6 +49,12 @@ with st.sidebar:
     theme = st.selectbox("Theme", options=list(THEMES.keys()), index=0)
     enable_ai = st.toggle("AI Insights (OpenAI)", value=False, help="Requires OPENAI_API_KEY in environment")
     insight_language = st.selectbox("Insight Language", ["English", "Deutsch", "中文"], index=0)
+    processing_mode = st.selectbox(
+        "Processing mode",
+        options=["auto", "bookkeeping", "generic"],
+        index=0,
+        help="Auto detects bookkeeping-style sheets; bookkeeping forces KPIs; generic only cleans data.",
+    )
     st.divider()
     st.markdown("**Data Input**")
     uploaded = st.file_uploader("Upload CSV/Excel", type=["csv", "xlsx"])
@@ -58,10 +64,10 @@ df = None
 src_name = None
 
 if uploaded is not None:
-    df, src_name = load_from_upload(uploaded)
+    df, src_name = load_from_upload(uploaded, clean=False)
 elif gsheet_url.strip():
     try:
-        df, src_name = load_from_gsheet_url(gsheet_url.strip())
+        df, src_name = load_from_gsheet_url(gsheet_url.strip(), clean=False)
     except Exception as e:
         st.error(f"Failed to load Google Sheets: {e}")
 
@@ -72,36 +78,47 @@ if df is not None:
     with st.expander("ℹ️ Summary", expanded=False):
         st.write(brief_summary(df))
 
-    # Bookkeeping KPI cards
-    with st.expander("💼 Bookkeeping KPIs", expanded=True):
-        try:
-            summaries = process_tabular(df)
-            cards = summaries.get("cards", {}) or {}
-            # ensure bookkeeping staples always present
-            defaults = {
-                "revenue": 0.0,
-                "cost": 0.0,
-                "payroll": 0.0,
-                "profit": cards.get("revenue", 0.0) + cards.get("cost", 0.0),
-                "vat_base": 0.0,
-                "vat_amount": 0.0,
-            }
-            for k, v in defaults.items():
-                cards.setdefault(k, v)
+    pipeline_result = process_uploaded_file(df, mode=processing_mode, debug=False)
+    df_for_viz = pipeline_result["df_final"]
 
-            render_kpi_cards(cards)
-        except Exception as e:
-            st.info(f"Bookkeeping KPIs unavailable: {e}")
+    with st.expander("Pipeline debug", expanded=False):
+        st.write(f"Mode requested: `{processing_mode}` → used: `{pipeline_result['mode_used']}`")
+        st.json(pipeline_result.get("detection", {}))
+        logs = pipeline_result.get("logs") or []
+        if logs:
+            st.code("\n\n".join(logs))
+
+    # Bookkeeping KPI cards (only when bookkeeping path used)
+    with st.expander("💼 Bookkeeping KPIs", expanded=True):
+        if pipeline_result["mode_used"] != "bookkeeping" or not pipeline_result.get("bookkeeping"):
+            st.info("Bookkeeping pipeline not applied (mode is generic or auto chose generic).")
+        else:
+            try:
+                cards = pipeline_result["bookkeeping"]["cards"] or {}
+                defaults = {
+                    "revenue": 0.0,
+                    "cost": 0.0,
+                    "payroll": 0.0,
+                    "profit": cards.get("revenue", 0.0) + cards.get("cost", 0.0),
+                    "vat_base": 0.0,
+                    "vat_amount": 0.0,
+                }
+                for k, v in defaults.items():
+                    cards.setdefault(k, v)
+
+                render_kpi_cards(cards)
+            except Exception as e:
+                st.info(f"Bookkeeping KPIs unavailable: {e}")
 
     # Chart suggestions
-    specs = suggest_charts(df)
-    st.subheader("🧠 Suggested Charts")
+    specs = suggest_charts(df_for_viz)
+    st.subheader("Suggested Charts")
     chosen = []
     for spec in specs:
         with st.container(border=True):
             colL, colR = st.columns([3,2])
             with colL:
-                fig = render_chart(df, spec, theme=theme)
+                fig = render_chart(df_for_viz, spec, theme=theme)
                 st.plotly_chart(fig, use_container_width=True)
             with colR:
                 st.write(f"**Type**: {spec.kind}")
@@ -115,7 +132,7 @@ if df is not None:
     if st.button("✍️ Generate Insights") or (chosen and st.session_state.get("auto_insights_once") is None and enable_ai):
         st.session_state["auto_insights_once"] = True
         with st.spinner("Generating insights..."):
-            insights_text = generate_insights(df, chosen, language=insight_language if enable_ai else None)
+            insights_text = generate_insights(df_for_viz, chosen, language=insight_language if enable_ai else None)
     if insights_text:
         st.subheader("Insights")
         st.write(insights_text)
@@ -135,7 +152,7 @@ if df is not None:
     if st.button("Download PDF", disabled=not kaleido_ok):
         with st.spinner("Building PDF..."):
             try:
-                pdf_bytes = build_pdf_report(df, chosen, report_title, brand, theme=theme, insights=insights_text)
+                pdf_bytes = build_pdf_report(df_for_viz, chosen, report_title, brand, theme=theme, insights=insights_text)
             except Exception as e:
                 st.error(f"Failed to build PDF: {e}")
                 pdf_bytes = None

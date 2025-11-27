@@ -15,15 +15,32 @@ def render_chart(df: pd.DataFrame, spec: ChartSpec, theme: str = "Default"):
     tpl = theme_cfg["template"]
     seq = theme_cfg["color_discrete_sequence"]
 
+    def _safe_cat(series):
+        return series.fillna("Missing").astype(str)
+
+    # Avoid pd.NA issues in grouping/color
+    df_local = df.copy()
+    if spec.x and spec.x in df_local.columns:
+        df_local[spec.x] = _safe_cat(df_local[spec.x])
+    if spec.category and spec.category in df_local.columns:
+        df_local[spec.category] = _safe_cat(df_local[spec.category])
+
     if spec.kind == "line":
-        fig = px.line(df, x=spec.x, y=spec.y, template=tpl)
+        fig = px.line(df_local, x=spec.x, y=spec.y, template=tpl)
     elif spec.kind == "bar":
-        fig = px.bar(df, x=spec.x, y=spec.y, template=tpl, color=spec.x if df[spec.x].nunique() < 20 else None, color_discrete_sequence=seq)
+        fig = px.bar(
+            df_local,
+            x=spec.x,
+            y=spec.y,
+            template=tpl,
+            color=spec.x if spec.x and df_local[spec.x].nunique() < 20 else None,
+            color_discrete_sequence=seq,
+        )
     elif spec.kind == "pie":
-        agg = df.groupby(spec.category)[spec.y].sum().reset_index()
+        agg = df_local.groupby(spec.category)[spec.y].sum().reset_index()
         fig = px.pie(agg, names=spec.category, values=spec.y, template=tpl, color_discrete_sequence=seq)
     elif spec.kind == "waterfall":
-        agg = df.groupby(spec.category)[spec.y].sum().reset_index()
+        agg = df_local.groupby(spec.category)[spec.y].sum().reset_index()
         fig = go.Figure(
             go.Waterfall(
                 name="Contribution",
