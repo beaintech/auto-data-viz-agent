@@ -122,6 +122,8 @@ def build_pdf_report(
                 base += f" comparing {s.y or 'y'} across {s.x or 'x'} (agg={s.agg})."
             elif s.kind == "pie":
                 base += f" showing share of {s.y or 'y'} by {s.category or s.x}."
+            elif s.kind == "waterfall":
+                base += f" breaking down {s.y or 'y'} by {s.category or s.x} contributions."
             else:
                 base += "."
             if s.title:

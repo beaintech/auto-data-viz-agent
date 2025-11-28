@@ -90,7 +90,7 @@ TEXT = {
         "data_input": "Dateneingabe",
         "upload_csv": "CSV/Excel hochladen",
         "gsheet_url": "Google-Sheets-CSV-URL (optional)",
-        "drag_drop_title": "Drag-&-Drop-Upload",
+        "drag_drop_title": "📂 Drag-&-Drop-Upload",
         "drag_drop_caption": "Dateien hier ablegen oder den Sidebar-Upload nutzen; beides nutzt denselben Ablauf.",
         "loaded_message": "Geladen: **{name}** mit {rows} Zeilen × {cols} Spalten",
         "load_error": "Google Sheets konnten nicht geladen werden: {error}",

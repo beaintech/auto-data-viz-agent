@@ -32,3 +32,15 @@ def test_pdf_report():
             pytest.skip(f"Kaleido export unavailable in test environment: {e}")
         raise
     assert isinstance(pdf, (bytes, bytearray)) and len(pdf) > 1000
+
+
+def test_waterfall_fallback_when_pie_not_safe():
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=4, freq="D"),
+        "amount": [100, -50, 30, -10],
+        "category": ["A", "B", "A", "B"],
+    })
+    specs = suggest_charts(df)
+    assert len(specs) >= 3
+    assert specs[1].kind == "bar"
+    assert specs[2].kind == "waterfall"
