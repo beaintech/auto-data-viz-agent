@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from .utils import detect_time_column
 
 class ChartSpec(BaseModel):
-    kind: str                 # line | bar | pie | waterfall
+    kind: str                 # line | bar | pie
     x: Optional[str] = None
     y: Optional[str] = None
     category: Optional[str] = None
@@ -42,7 +42,7 @@ def suggest_charts(df: pd.DataFrame) -> List[ChartSpec]:
         if _pie_safe(df, cat_cols[0], numeric_cols[0]):
             specs.append(ChartSpec(kind="pie", category=cat_cols[0], y=numeric_cols[0], title=f"Share of {numeric_cols[0]} by {cat_cols[0]}"))
         else:
-            specs.append(ChartSpec(kind="waterfall", category=cat_cols[0], y=numeric_cols[0], title=f"Contribution of {numeric_cols[0]} by {cat_cols[0]}"))
+            specs.append(ChartSpec(kind="bar", x=cat_cols[0], y=numeric_cols[0], title=f"Contribution of {numeric_cols[0]} by {cat_cols[0]}"))
 
     # fallback: bar of first two numeric columns
     if not specs and len(numeric_cols) >= 2:

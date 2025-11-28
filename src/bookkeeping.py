@@ -10,6 +10,7 @@ from .data_cleaner import clean_tabular
 COLUMN_ALIASES: Dict[str, Iterable[str]] = {
     "date": ("date", "datum", "buchungsdatum", "valutadatum", "transaction_date", "posted_date"),
     "amount": ("amount", "betrag", "umsatz", "value", "summe", "payment_amount"),
+    "bk_category": ("bk_category", "bk category", "category", "kategorie"),
     "description": ("description", "verwendungszweck", "memo", "text", "notes", "zweck", "buchungstext"),
     "currency": ("currency", "waehrung", "währung", "cur", "curr"),
     "iban": ("iban", "account", "konto", "kontonummer", "account_number"),
@@ -53,6 +54,30 @@ def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     standardized = standardized.rename(columns=rename_map)
 
+    # Normalize date column if present
+    if "date" in standardized.columns:
+        standardized["date"] = pd.to_datetime(standardized["date"], errors="coerce")
+        # retry with dayfirst for European-style dates
+        if standardized["date"].notna().mean() < 0.9:
+            standardized["date"] = standardized["date"].fillna(pd.to_datetime(standardized["date"], errors="coerce", dayfirst=True))
+
+    # Derive year_month if available
+    if "year_month" in standardized.columns:
+        ym_raw = standardized["year_month"].astype(str).str.replace("/", "-", regex=False).str.strip()
+        parsed = pd.to_datetime(ym_raw, errors="coerce")
+        parsed = parsed.fillna(pd.to_datetime(ym_raw, errors="coerce", format="%b-%Y", dayfirst=False))
+        parsed = parsed.fillna(pd.to_datetime(ym_raw, errors="coerce", format="%Y-%m"))
+        standardized["year_month"] = parsed.dt.to_period("M").astype(str).where(parsed.notna(), pd.NA)
+    elif "date" in standardized.columns:
+        standardized["year_month"] = standardized["date"].dt.to_period("M").astype(str)
+
+    # Create canonical amount if missing but net/gross columns exist
+    if "amount" not in standardized.columns:
+        for candidate in ["amount_net", "net_amount", "amount_gross", "gross_amount"]:
+            if candidate in standardized.columns:
+                standardized["amount"] = standardized[candidate]
+                break
+
     if "currency" in standardized.columns:
         standardized["currency"] = (
             standardized["currency"]
@@ -60,6 +85,27 @@ def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
             .str.strip()
             .str.upper()
             .replace({"": pd.NA, "NONE": pd.NA, "NAN": pd.NA})
+        )
+
+    if "bk_category" in standardized.columns:
+        standardized["bk_category"] = (
+            standardized["bk_category"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .replace(
+                {
+                    "income": "income",
+                    "cost": "cost",
+                    "expenses": "cost",
+                    "expense": "cost",
+                    "payroll": "payroll",
+                    "salary": "payroll",
+                    "salaries": "payroll",
+                    "tax": "vat_payment",
+                    "vat_payment": "vat_payment",
+                }
+            )
         )
     return standardized
 

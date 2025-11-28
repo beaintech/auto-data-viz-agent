@@ -119,6 +119,63 @@ def detect_bookkeeping_table(df: pd.DataFrame) -> Dict:
     }
 
 
+def detect_pnl_summary(df: pd.DataFrame) -> Dict:
+    """
+    Detect pre-aggregated P&L-style summaries (e.g., Revenue_Net/Cost_Net/Payroll_Net/Profit).
+    """
+    if df is None or df.empty:
+        return {"looks_pnl": False, "columns": {}, "cards": {}}
+
+    norm_map = {_normalize_column_key(c): c for c in df.columns}
+
+    def pick(keys: Iterable[str]) -> Optional[str]:
+        for k in keys:
+            if k in norm_map:
+                return norm_map[k]
+        return None
+
+    revenue_col = pick(["revenue_net", "revenue", "income", "sales", "umsatz_netto"])
+    cost_col = pick(["cost_net", "cost", "expenses", "expense"])
+    payroll_col = pick(["payroll_net", "payroll", "salaries", "salary"])
+    profit_col = pick(["profit_after_tax", "profit_before_tax", "profit"])
+    vat_col = pick(["vat_paid", "vat_amount", "total_vat_collected", "vat"])
+
+    looks_pnl = any([revenue_col, cost_col, payroll_col, profit_col, vat_col])
+    columns = {
+        "revenue": revenue_col,
+        "cost": cost_col,
+        "payroll": payroll_col,
+        "profit": profit_col,
+        "vat": vat_col,
+    }
+
+    if not looks_pnl:
+        return {"looks_pnl": False, "columns": columns, "cards": {}}
+
+    def sum_col(col_name: Optional[str]) -> float:
+        if not col_name or col_name not in df.columns:
+            return 0.0
+        return float(pd.to_numeric(df[col_name], errors="coerce").sum())
+
+    revenue = sum_col(revenue_col)
+    cost = sum_col(cost_col)
+    payroll = sum_col(payroll_col)
+    profit = sum_col(profit_col) if profit_col else revenue + cost + payroll
+    vat_amount = sum_col(vat_col)
+    vat_base = revenue / 1.19 if revenue else 0.0
+
+    cards = {
+        "revenue": revenue,
+        "cost": cost,
+        "payroll": payroll,
+        "profit": profit,
+        "vat_base": vat_base,
+        "vat_amount": vat_amount,
+    }
+
+    return {"looks_pnl": True, "columns": columns, "cards": cards}
+
+
 def process_uploaded_file(
     source: Union[str, Path, pd.DataFrame],
     mode: str = "auto",
@@ -142,10 +199,21 @@ def process_uploaded_file(
     _log(debug, logs, f"Cleaned DataFrame head:\n{cleaned.head(5)}")
 
     detection = detect_bookkeeping_table(cleaned)
+    # If a BK category and amount-like columns exist but detection failed, allow bookkeeping
+    if not detection["looks_bookkeeping"]:
+        bk_cols = [c for c in cleaned.columns if _normalize_column_key(c) in {"bk_category", "category"}]
+        amount_like = [c for c in cleaned.columns if "amount" in _normalize_column_key(c)]
+        if bk_cols and amount_like:
+            detection["looks_bookkeeping"] = True
+            detection["reason"] = "found bk_category with amount columns"
+            detection["selected"]["amount"] = amount_like[0]
+            detection["selected"]["description"] = bk_cols[0]
+    pnl_summary = detect_pnl_summary(cleaned)
     chosen_mode = mode
     if mode == "auto":
-        chosen_mode = "bookkeeping" if detection["looks_bookkeeping"] else "generic"
-        _log(debug, logs, f"Auto-detected mode: {chosen_mode} ({detection['reason']})")
+        chosen_mode = "bookkeeping" if (detection["looks_bookkeeping"] or pnl_summary["looks_pnl"]) else "generic"
+        reason = detection["reason"] if detection["looks_bookkeeping"] else "found P&L summary"
+        _log(debug, logs, f"Auto-detected mode: {chosen_mode} ({reason})")
 
     result: Dict[str, Optional[object]] = {
         "mode_requested": mode,
@@ -158,10 +226,25 @@ def process_uploaded_file(
     }
 
     if chosen_mode != "bookkeeping":
+        if pnl_summary["looks_pnl"]:
+            _log(debug, logs, f"Detected P&L summary columns: {pnl_summary['columns']}")
+            result["mode_used"] = "bookkeeping"
+            result["bookkeeping"] = {
+                "summaries": {"pnl_summary": cleaned, "columns": pnl_summary["columns"]},
+                "cards": pnl_summary["cards"],
+            }
+            return result
         _log(debug, logs, "Using generic mode: returning cleaned DataFrame without categorization or KPIs.")
         return result
 
     if not detection["looks_bookkeeping"]:
+        if pnl_summary["looks_pnl"]:
+            _log(debug, logs, f"Bookkeeping requested; using P&L summary columns: {pnl_summary['columns']}")
+            result["bookkeeping"] = {
+                "summaries": {"pnl_summary": cleaned, "columns": pnl_summary["columns"]},
+                "cards": pnl_summary["cards"],
+            }
+            return result
         _log(debug, logs, "Requested bookkeeping but table does not look like transactions. Falling back to generic.")
         result["mode_used"] = "generic"
         return result
@@ -176,15 +259,26 @@ def process_uploaded_file(
     )
 
     if not bk_detect["looks_bookkeeping"]:
+        if pnl_summary["looks_pnl"]:
+            result["bookkeeping"] = {
+                "summaries": {"pnl_summary": standardized, "columns": pnl_summary["columns"]},
+                "cards": pnl_summary["cards"],
+            }
+            return result
         _log(debug, logs, "Standardization removed bookkeeping structure; falling back to generic mode.")
         result["mode_used"] = "generic"
         return result
 
     if "amount" not in standardized.columns:
-        _log(debug, logs, "Bookkeeping mode requested but no 'amount' column after standardization. Falling back to generic.")
-        result["mode_used"] = "generic"
-        result["df_final"] = standardized
-        return result
+        amount_like = [c for c in standardized.columns if "amount" in _normalize_column_key(c)]
+        if amount_like:
+            standardized["amount"] = pd.to_numeric(standardized[amount_like[0]], errors="coerce")
+            _log(debug, logs, f"Filled missing 'amount' from column {amount_like[0]}")
+        else:
+            _log(debug, logs, "Bookkeeping mode requested but no 'amount' column after standardization. Falling back to generic.")
+            result["mode_used"] = "generic"
+            result["df_final"] = standardized
+            return result
 
     categorized = categorize_transactions(standardized)
     recurring = detect_recurring(categorized)

@@ -114,8 +114,37 @@ def build_pdf_report(
         img.save(img_bytes, format="PNG")
         img_bytes.seek(0)
 
+        def _describe_chart(s: ChartSpec) -> str:
+            base = f"{s.kind.capitalize()} chart"
+            if s.kind == "line":
+                base += f" showing {s.y or 'y'} over {s.x or 'x'} (agg={s.agg})."
+            elif s.kind == "bar":
+                base += f" comparing {s.y or 'y'} across {s.x or 'x'} (agg={s.agg})."
+            elif s.kind == "pie":
+                base += f" showing share of {s.y or 'y'} by {s.category or s.x}."
+            else:
+                base += "."
+            if s.title:
+                base += f' Title: "{s.title}".'
+            return base
+
         c.setFont("Helvetica-Bold", 14)
         c.drawString(2 * cm, H - 2 * cm, spec.title or f"{spec.kind} chart")
+        desc = _describe_chart(spec)
+        textobj = c.beginText(2 * cm, H - 2.7 * cm)
+        textobj.setFont("Helvetica", 11)
+        # simple wrap at ~90 chars
+        line = ""
+        for word in desc.split():
+            if len(line) + len(word) + 1 > 90:
+                textobj.textLine(line)
+                line = word
+            else:
+                line = f"{line} {word}".strip()
+        if line:
+            textobj.textLine(line)
+        c.drawText(textobj)
+
         c.drawImage(
             ImageReader(img_bytes),
             1.5 * cm,
