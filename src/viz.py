@@ -28,6 +28,40 @@ THEME_STYLES: Dict[str, Dict] = {
     },
 }
 
+def _prepare_line_data(df: pd.DataFrame, spec: ChartSpec):
+    """
+    Aggregate time series before plotting:
+      - prefer the date column; fall back to spec.x if date is missing
+      - coerce dates for proper sorting
+      - sum the metric
+    """
+    df_local = df.copy()
+    group_col = "date" if "date" in df_local.columns else spec.x
+    if group_col not in df_local.columns:
+        raise KeyError(f"Line chart requires time column '{group_col}' to exist.")
+
+    df_local[group_col] = pd.to_datetime(df_local[group_col], errors="coerce")
+    if spec.y == "__row_count__":
+        agg = (
+            df_local.dropna(subset=[group_col])
+            .groupby(group_col, dropna=False)
+            .size()
+            .reset_index(name="value")
+            .sort_values(group_col, ascending=True)
+        )
+        value_col = "value"
+    else:
+        df_local[spec.y] = pd.to_numeric(df_local[spec.y], errors="coerce")
+        agg = (
+            df_local.dropna(subset=[group_col, spec.y])
+            .groupby(group_col, dropna=False)[spec.y]
+            .sum(min_count=1)
+            .reset_index()
+            .sort_values(group_col, ascending=True)
+        )
+        value_col = spec.y
+    return agg, group_col, value_col
+
 def render_chart(df: pd.DataFrame, spec: ChartSpec, theme: str = "Default"):
     theme_cfg = THEMES.get(theme) or THEMES[DEFAULT_THEME]
     tpl = theme_cfg["template"]
@@ -38,25 +72,58 @@ def render_chart(df: pd.DataFrame, spec: ChartSpec, theme: str = "Default"):
 
     # Avoid pd.NA issues in grouping/color
     df_local = df.copy()
-    if spec.x and spec.x in df_local.columns:
+    if spec.kind != "line" and spec.x and spec.x in df_local.columns:
         df_local[spec.x] = _safe_cat(df_local[spec.x])
     if spec.category and spec.category in df_local.columns:
         df_local[spec.category] = _safe_cat(df_local[spec.category])
 
     if spec.kind == "line":
-        fig = px.line(df_local, x=spec.x, y=spec.y, template=tpl, color_discrete_sequence=seq)
+        agg, group_col, value_col = _prepare_line_data(df_local, spec)
+        fig = px.line(agg, x=group_col, y=value_col, template=tpl, color_discrete_sequence=seq)
+        # Normalize title when we force date grouping
+        if group_col == "date":
+            title = "Count over date" if spec.y == "__row_count__" else f"{value_col} over date"
+            fig.update_layout(title=title)
     elif spec.kind == "bar":
-        fig = px.bar(
-            df_local,
-            x=spec.x,
-            y=spec.y,
-            template=tpl,
-            color=spec.x if spec.x and df_local[spec.x].nunique() < 20 else None,
-            color_discrete_sequence=seq,
-        )
+        if spec.y == "__row_count__":
+            grouped = (
+                df_local.dropna(subset=[spec.x])
+                .groupby(spec.x)
+                .size()
+                .reset_index(name="value")
+            )
+            fig = px.bar(
+                grouped,
+                x=spec.x,
+                y="value",
+                template=tpl,
+                color=spec.x if spec.x and grouped[spec.x].nunique() < 20 else None,
+                color_discrete_sequence=seq,
+            )
+        else:
+            fig = px.bar(
+                df_local,
+                x=spec.x,
+                y=spec.y,
+                template=tpl,
+                color=spec.x if spec.x and df_local[spec.x].nunique() < 20 else None,
+                color_discrete_sequence=seq,
+            )
     elif spec.kind == "pie":
-        agg = df_local.groupby(spec.category)[spec.y].sum().reset_index()
-        fig = px.pie(agg, names=spec.category, values=spec.y, template=tpl, color_discrete_sequence=seq)
+        if spec.category and spec.category in df_local.columns:
+            df_local[spec.category] = _safe_cat(df_local[spec.category])
+        if spec.y == "__row_count__":
+            agg = (
+                df_local.dropna(subset=[spec.category])
+                .groupby(spec.category, dropna=False)
+                .size()
+                .reset_index(name="value")
+            )
+            value_col = "value"
+        else:
+            agg = df_local.groupby(spec.category)[spec.y].sum(min_count=1).reset_index()
+            value_col = spec.y
+        fig = px.pie(agg, names=spec.category, values=value_col, template=tpl, color_discrete_sequence=seq)
     elif spec.kind == "waterfall":
         agg = df_local.groupby(spec.category)[spec.y].sum().reset_index()
         fig = go.Figure(

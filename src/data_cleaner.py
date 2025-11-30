@@ -49,6 +49,15 @@ class DataCleaner:
         # Drop duplicates
         cleaned = cleaned.drop_duplicates()
 
+        # --- enforce chronological order ---
+        if "date" in cleaned.columns:
+            # try to convert to datetime for correct sorting
+            dt = pd.to_datetime(cleaned["date"], errors="coerce")
+            cleaned["date"] = dt
+            cleaned = cleaned.sort_values("date", ascending=True)
+            # final formatted string representation
+            cleaned["date"] = cleaned["date"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
         return cleaned
 
     def _standardize_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -167,6 +176,14 @@ class DataCleaner:
         return df
 
     def _drop_missing_key_fields(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Only enforce key-field requirements for financial-looking tables.
+        Non-financial tables skip this step entirely.
+        """
+        finance_markers = {"amount", "amount_net", "amount_gross", "vat_amount"}
+        if not (set(df.columns) & finance_markers):
+            return df
+
         # Always require date if present
         if "date" in df.columns:
             df = df.dropna(subset=["date"], how="any")
