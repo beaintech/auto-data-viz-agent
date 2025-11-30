@@ -17,7 +17,7 @@ class DataCleaner:
       5) date coercion (with dayfirst fallback)
       6) year-month normalization
       7) drop empty rows/cols
-      8) drop rows missing key fields
+      8) drop empty finance rows
       9) drop duplicates
     """
 
@@ -55,8 +55,6 @@ class DataCleaner:
             dt = pd.to_datetime(cleaned["date"], errors="coerce")
             cleaned["date"] = dt
             cleaned = cleaned.sort_values("date", ascending=True)
-            # final formatted string representation
-            cleaned["date"] = cleaned["date"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
         return cleaned
 
@@ -177,35 +175,24 @@ class DataCleaner:
 
     def _drop_missing_key_fields(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Only enforce key-field requirements for financial-looking tables.
+        Only drop placeholder rows for financial-looking tables:
+        rows where the date is missing AND all amount-like columns are missing.
         Non-financial tables skip this step entirely.
         """
         finance_markers = {"amount", "amount_net", "amount_gross", "vat_amount"}
         if not (set(df.columns) & finance_markers):
             return df
 
-        # Always require date if present
-        if "date" in df.columns:
-            df = df.dropna(subset=["date"], how="any")
-
         amount_like = [c for c in df.columns if any(hint in c.lower() for hint in ["amount", "gross", "net", "betrag"])]
         amount_like = list(dict.fromkeys(amount_like))
 
-        if not amount_like:
+        if "date" not in df.columns or not amount_like:
             return df
 
-        # Prefer strict drop on amount_gross if present (user expectation)
-        if "amount_gross" in amount_like:
-            df = df.dropna(subset=["amount_gross"], how="any")
-
-        # Then ensure at least one other amount-like field is present
-        remaining = [c for c in amount_like if c != "amount_gross"]
-        if remaining:
-            if len(remaining) == 1:
-                df = df.dropna(subset=remaining, how="any")
-            else:
-                df = df.dropna(subset=remaining, how="all")
-        return df
+        missing_date = df["date"].isna()
+        missing_amounts = df[amount_like].isna().all(axis=1)
+        keep_mask = ~(missing_date & missing_amounts)
+        return df.loc[keep_mask]
 
     def _normalize_monetary_series(self, series: pd.Series) -> pd.Series:
         def parse_value(val):

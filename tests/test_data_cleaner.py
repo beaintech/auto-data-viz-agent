@@ -30,3 +30,24 @@ def test_data_cleaner_normalizes_and_coerces_types():
     # trimmed text and duplicate rows removed
     assert cleaned["city"].iloc[0] == "Berlin"
     assert len(cleaned) == 2
+
+
+def test_finance_rows_only_dropped_when_date_and_amounts_missing():
+    raw = pd.DataFrame(
+        {
+            "Date": [None, "2024-02-01", None, None],
+            "Amount": [None, None, 5, None],
+            "Note": ["header-ish", None, "has amount", "only meta"],
+        }
+    )
+
+    cleaned = cleaner.clean(raw)
+
+    # keep row with date but missing amount, and row with amount but missing date
+    assert len(cleaned) == 2
+    assert cleaned["amount"].isna().sum() == 1
+    assert (cleaned["amount"] == 5).sum() == 1
+
+    # drop rows where both date and all amount-like fields are missing
+    assert pd.isna(cleaned["note"].iloc[0])
+    assert cleaned["note"].iloc[1] == "has amount"
