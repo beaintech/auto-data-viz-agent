@@ -14,7 +14,7 @@ class DataCleaner:
       2) strip/normalize strings → NA
       3) monetary parsing
       4) generic numeric coercion
-      5) date coercion (with dayfirst fallback)
+      5) date coercion (with dayfirst fallback, localized to DE)
       6) year-month normalization
       7) drop empty rows/cols
       8) drop empty finance rows
@@ -25,6 +25,7 @@ class DataCleaner:
         self.min_numeric_ratio = min_numeric_ratio
         self.min_date_ratio = min_date_ratio
         self.key_fields = {"date", "amount", "amount_net", "amount_gross"}
+        self.local_timezone = "Europe/Berlin"
         
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         if df is None:
@@ -38,6 +39,9 @@ class DataCleaner:
         cleaned = self._coerce_numeric(cleaned)
         cleaned = self._coerce_dates(cleaned)
         cleaned = self._normalize_year_month(cleaned)
+        cleaned = self._normalize_hr_fields(cleaned)
+        cleaned = self._normalize_country(cleaned)
+
 
         # Drop empty rows/cols
         cleaned = cleaned.dropna(how="all")
@@ -151,8 +155,17 @@ class DataCleaner:
                     parsed = parsed.fillna(pd.to_datetime(series, errors="coerce", dayfirst=True))
                     for fmt in ("%d.%m.%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"):
                         parsed = parsed.fillna(pd.to_datetime(series, errors="coerce", format=fmt))
-            df[col] = parsed.dt.normalize().astype("datetime64[ns]")
+            localized = self._localize_datetime(parsed)
+            df[col] = localized.dt.normalize().dt.tz_localize(None)
         return df
+
+    def _localize_datetime(self, series: pd.Series) -> pd.Series:
+        """
+        Convert parsed datetime series to Germany local time without losing time-of-day.
+        """
+        if series.dt.tz is None:
+            return series.dt.tz_localize(self.local_timezone, nonexistent="NaT", ambiguous="NaT")
+        return series.dt.tz_convert(self.local_timezone)
 
     def _normalize_year_month(self, df: pd.DataFrame) -> pd.DataFrame:
         ym_cols = [c for c in df.columns if "yearmonth" in c.lower() or "year_month" in c.lower() or "year-month" in c.lower()]
@@ -205,8 +218,12 @@ class DataCleaner:
             if not text:
                 return pd.NA
 
+            # 去掉货币符号
             text = re.sub(r"[€$£¥]", "", text)
+            # 去掉不间断空格和普通空格
             text = text.replace("\u00A0", "").replace(" ", "")
+            # 关键：去掉所有字母等非数字/符号（吃掉 "ca.", "EUR" 等）
+            text = re.sub(r"[^0-9,.\-]", "", text)
 
             if "," in text and "." in text:
                 last_comma = text.rfind(",")
@@ -225,6 +242,148 @@ class DataCleaner:
 
         return series.apply(parse_value)
 
+    def _normalize_hr_fields(self, df: pd.DataFrame) -> pd.DataFrame:
+        cols_lower = {c.lower(): c for c in df.columns}
+
+        # 性别：F/M
+        for key in ["geschlecht", "gender"]:
+            if key in cols_lower:
+                col = cols_lower[key]
+                mapping = {
+                    "female": "Female", "f": "Female", "w": "Female", "frau": "Female",
+                    "male": "Male", "m": "Male", "mann": "Male"
+                }
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .replace(mapping)
+                    .where(df[col].notna(), pd.NA)
+                )
+
+        # 合同类型：full_time / part_time / temporary / other
+        for key in ["vertragsart", "employment_type", "contract_type"]:
+            if key in cols_lower:
+                col = cols_lower[key]
+                s = df[col].astype(str).str.strip().str.lower()
+                def map_contract(x: str) -> str | type(pd.NA):
+                    if x in ("nan", ""):
+                        return pd.NA
+                    if "full" in x:
+                        return "full_time"
+                    if "part" in x:
+                        return "part_time"
+                    if "temp" in x:
+                        return "temporary"
+                    return x  # keep as-is for now
+
+                df[col] = s.map(map_contract)
+
+        # 货币：统一成大写代码
+        for key in ["waehrung", "currency"]:
+            if key in cols_lower:
+                col = cols_lower[key]
+                mapping = {
+                    "eur": "EUR",
+                    "€": "EUR",
+                    "euro": "EUR",
+                }
+                df[col] = (
+                    df[col]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .replace(mapping)
+                    .str.upper()
+                    .where(df[col].notna(), pd.NA)
+                )
+
+        # 支付频率：统一成 monthly / yearly 等
+        for key in ["zahlfrequenz", "pay_frequency", "payment_frequency"]:
+            if key in cols_lower:
+                col = cols_lower[key]
+                s = df[col].astype(str).str.strip().str.lower()
+                def map_freq(x: str) -> str | type(pd.NA):
+                    if x in ("nan", ""):
+                        return pd.NA
+                    if any(word in x for word in ["monat", "monthly", "monatl"]):
+                        return "monthly"
+                    if any(word in x for word in ["jahr", "year", "annual"]):
+                        return "yearly"
+                    return x
+
+                df[col] = s.map(map_freq)
+
+        for key in ["status", "employment_status"]:
+            if key in cols_lower:
+                col = cols_lower[key]
+
+                s = df[col].astype(str).str.strip().str.lower()
+
+                def map_status(x: str):
+                    if x in ("", "nan"):
+                        return pd.NA
+                    # active 族
+                    if x in ("active", "aktiv", "true", "yes", "y", "1"):
+                        return "active"
+                    # inactive 族
+                    if x in ("inactive", "inaktiv", "false", "no", "n", "0"):
+                        return "inactive"
+                    # 其它值原样保留（以防有第三种状态，比如 "on_leave"）
+                    return x
+
+                df[col] = s.map(map_status)
+
+        return df
+    
+    def _normalize_country(self, df: pd.DataFrame) -> pd.DataFrame:
+        # detect a possible country column
+        country_candidates = [c for c in df.columns if c.lower() in ["land", "country", "location", "standort"]]
+        if not country_candidates:
+            return df
+
+        col = country_candidates[0]
+
+        mapping = {
+            "de": "Germany",
+            "ger": "Germany",
+            "deutschland": "Germany",
+            "at": "Austria",
+            "österreich": "Austria",
+            "osterreich": "Austria",
+            "ch": "Switzerland",
+            "schweiz": "Switzerland",
+            "it": "Italy",
+            "italien": "Italy",
+            "es": "Spain",
+            "spanien": "Spain",
+            "spain": "Spain",
+            "usa": "United States",
+            "us": "United States",
+            "uk": "United Kingdom",
+            "england": "United Kingdom",
+            "in": "India",
+            "indien": "India",
+            "india": "India",
+            "cn": "China",
+            "china": "China",
+            "kr": "South Korea",
+            "südkorea": "South Korea",
+            "suedkorea": "South Korea",
+        }
+
+        s = (
+            df[col]
+            .astype(str)
+            .str.strip()
+            .str.replace(r"[\u00A0\s]+", "", regex=True)
+            .str.lower()
+        )
+
+        df[col] = s.replace(mapping).where(df[col].notna(), pd.NA)
+
+        return df
 
 cleaner = DataCleaner()
 

@@ -11,7 +11,7 @@ from src.chart_suggester import suggest_charts, ChartSpec
 from src.viz import render_chart, THEMES
 from src.insights import generate_insights
 from src.report import build_pdf_report
-from src.pipeline import process_uploaded_file
+from src.pipeline import process_uploaded_file           
 
 LANGUAGE_NAMES = {"en": "English", "de": "Deutsch", "zh": "中文"}
 
