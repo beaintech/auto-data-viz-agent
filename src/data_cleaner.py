@@ -14,7 +14,7 @@ class DataCleaner:
       2) strip/normalize strings → NA
       3) monetary parsing
       4) generic numeric coercion
-      5) date coercion (with dayfirst fallback, localized to DE)
+      5) date coercion (with dayfirst fallback)
       6) year-month normalization
       7) drop empty rows/cols
       8) drop empty finance rows
@@ -25,7 +25,6 @@ class DataCleaner:
         self.min_numeric_ratio = min_numeric_ratio
         self.min_date_ratio = min_date_ratio
         self.key_fields = {"date", "amount", "amount_net", "amount_gross"}
-        self.local_timezone = "Europe/Berlin"
         
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         if df is None:
@@ -59,6 +58,8 @@ class DataCleaner:
             dt = pd.to_datetime(cleaned["date"], errors="coerce")
             cleaned["date"] = dt
             cleaned = cleaned.sort_values("date", ascending=True)
+            # drop time component and format to German-style DD.MM.YYYY
+            cleaned["date"] = cleaned["date"].dt.strftime("%d.%m.%Y")
 
         return cleaned
 
@@ -132,17 +133,21 @@ class DataCleaner:
             if numerics.notna().mean() >= self.min_numeric_ratio:
                 df[col] = numerics
         return df
-
+    
     def _coerce_dates(self, df: pd.DataFrame) -> pd.DataFrame:
         for col in df.columns:
             name = col.lower()
+            # 只处理列名里包含这些关键词的列
             if not any(hint in name for hint in ["date", "datum", "posted"]):
                 continue
 
             series = df[col]
+
             if pd.api.types.is_datetime64_any_dtype(series):
+                # 已经是 datetime 的，直接规范化解析一次
                 parsed = pd.to_datetime(series, errors="coerce")
             else:
+                # 先把各种奇怪空格和分隔符统一一下
                 series = (
                     series.astype(str)
                     .str.replace(r"[\u00A0]", " ", regex=True)
@@ -151,21 +156,27 @@ class DataCleaner:
                 )
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message="Could not infer format.*")
+                    # 第一轮：通用解析
                     parsed = pd.to_datetime(series, errors="coerce")
-                    parsed = parsed.fillna(pd.to_datetime(series, errors="coerce", dayfirst=True))
-                    for fmt in ("%d.%m.%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M"):
-                        parsed = parsed.fillna(pd.to_datetime(series, errors="coerce", format=fmt))
-            localized = self._localize_datetime(parsed)
-            df[col] = localized.dt.normalize().dt.tz_localize(None)
-        return df
+                    # 第二轮：dayfirst=True（处理 31-05-1989 / 31.05.1989）
+                    parsed = parsed.fillna(
+                        pd.to_datetime(series, errors="coerce", dayfirst=True)
+                    )
+                    # 第三轮：指定格式兜底
+                    for fmt in (
+                        "%d.%m.%Y",
+                        "%d-%m-%Y",
+                        "%Y-%m-%d",
+                        "%Y-%m-%d %H:%M:%S",
+                        "%d.%m.%Y %H:%M",
+                    ):
+                        parsed = parsed.fillna(
+                            pd.to_datetime(series, errors="coerce", format=fmt)
+                        )
 
-    def _localize_datetime(self, series: pd.Series) -> pd.Series:
-        """
-        Convert parsed datetime series to Germany local time without losing time-of-day.
-        """
-        if series.dt.tz is None:
-            return series.dt.tz_localize(self.local_timezone, nonexistent="NaT", ambiguous="NaT")
-        return series.dt.tz_convert(self.local_timezone)
+            df[col] = parsed.dt.strftime("%m/%d/%y").where(parsed.notna(), pd.NA)
+
+        return df
 
     def _normalize_year_month(self, df: pd.DataFrame) -> pd.DataFrame:
         ym_cols = [c for c in df.columns if "yearmonth" in c.lower() or "year_month" in c.lower() or "year-month" in c.lower()]
@@ -222,18 +233,47 @@ class DataCleaner:
             text = re.sub(r"[€$£¥]", "", text)
             # 去掉不间断空格和普通空格
             text = text.replace("\u00A0", "").replace(" ", "")
-            # 关键：去掉所有字母等非数字/符号（吃掉 "ca.", "EUR" 等）
-            text = re.sub(r"[^0-9,.\-]", "", text)
+            # 去掉所有字母（吃掉 "ca", "EUR" 等）
+            text = re.sub(r"[A-Za-z]", "", text)
 
+            if not text:
+                return pd.NA
+
+            # 关键补丁：去掉前面残留的非数字（例如 ".2900" -> "2900"）
+            text = re.sub(r"^[^0-9\-]+", "", text)
+            if not text:
+                return pd.NA
+
+            # 同时有逗号和点：最后一个分隔符作为小数点
             if "," in text and "." in text:
                 last_comma = text.rfind(",")
                 last_dot = text.rfind(".")
-                if last_comma > last_dot:
-                    text = text.replace(".", "").replace(",", ".")
-                else:
+                if last_dot > last_comma:
+                    # 点是小数点，逗号是千位分隔
                     text = text.replace(",", "")
-            else:
-                text = text.replace(",", ".")
+                else:
+                    # 逗号是小数点，点是千位分隔
+                    text = text.replace(".", "").replace(",", ".")
+            # 只有逗号
+            elif "," in text:
+                idx = text.rfind(",")
+                digits_after = len(text) - idx - 1
+                if digits_after == 3:
+                    # 千位分隔符
+                    text = text.replace(",", "")
+                else:
+                    # 小数点
+                    text = text.replace(",", ".")
+            # 只有点
+            elif "." in text:
+                idx = text.rfind(".")
+                digits_after = len(text) - idx - 1
+                if digits_after == 3:
+                    # 千位分隔符
+                    text = text.replace(".", "")
+                else:
+                    # 小数点，保留
+                    pass
 
             try:
                 return float(text)
